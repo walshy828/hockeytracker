@@ -1,0 +1,12 @@
+services:
+  hockeytracker:
+    build: .
+    container_name: hockeytracker
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Optional: require "Authorization: Bearer <token>" on /mcp
+      - MCP_TOKEN=
+    volumes:
+      - ./data:/data
