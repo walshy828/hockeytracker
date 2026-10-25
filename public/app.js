@@ -330,12 +330,31 @@ function toggleMic() {
   if (rec) { rec.stop(); return; }
   if (!SR) { toast('Voice needs HTTPS. Use the 🎙 on your keyboard instead.'); ta.focus(); return; }
   c.stamp ||= snap(); c.voice = true;
-  const base = ta.value + (ta.value && !/\s$/.test(ta.value) ? ' ' : '');
-  rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
-  rec.onresult = (ev) => { let t = ''; for (const r of ev.results) t += r[0].transcript; ta.value = base + t; c.text = ta.value; };
-  rec.onerror = (ev) => toast('Mic: ' + ev.error);
-  rec.onend = () => { rec = null; $('#mic')?.classList.remove('rec'); if (S.autosave && (ta?.value || '').trim()) saveNote(); };
-  rec.start(); $('#mic').classList.add('rec');
+  // Android Chrome re-emits interim results as new entries when continuous=true,
+  // duplicating words. Use single-phrase sessions, commit finals once, and restart.
+  let base = ta.value + (ta.value && !/\s$/.test(ta.value) ? ' ' : '');
+  let wanted = true, fatal = false;
+  const show = (t) => { ta.value = base + t; c.text = ta.value; };
+  const start = () => {
+    const r = rec = new SR(); r.continuous = false; r.interimResults = true; r.lang = 'en-US';
+    const halt = r.stop.bind(r); r.stop = () => { wanted = false; halt(); };
+    r.onresult = (ev) => {
+      const res = ev.results[ev.results.length - 1];
+      const t = res[0].transcript.trim();
+      if (res.isFinal) { base += t + ' '; show(''); } else show(t);
+    };
+    r.onerror = (ev) => {
+      if (ev.error === 'no-speech' || ev.error === 'aborted') return;
+      fatal = true; toast('Mic: ' + ev.error);
+    };
+    r.onend = () => {
+      if (wanted && !fatal) { try { start(); return; } catch { /* fall through */ } }
+      rec = null; $('#mic')?.classList.remove('rec');
+      if (S.autosave && (ta?.value || '').trim()) saveNote();
+    };
+    r.start();
+  };
+  start(); $('#mic').classList.add('rec');
 }
 function noteAbout(pid, prefix = '') {
   S.composer.about = new Set(pid ? [pid] : []); S.composer.text = prefix; S.composer.stamp = snap(); S.tab = 'notes'; render(); $('#nt').focus();
