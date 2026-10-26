@@ -11,7 +11,7 @@ const rid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toStr
 
 const S = {
   players: [], games: [], game: null, events: [],
-  impText: '', impRows: [], tab: 'notes', logFilter: 'all', exportText: '',
+  impText: '', impRows: [], tab: 'notes', sec: 'game', delGame: null, logFilter: 'all', exportText: '',
   composer: { text: '', about: new Set(), stamp: null, voice: false },
   clk: null, perMenu: false, pick: null, foSel: null, foFmt: 'ratio', foZone: 'N', statSel: 0, statPick: false,
   outbox: ls.get('ht_outbox', []), clockDefault: ls.get('ht_clock_default', false), autosave: ls.get('ht_autosave', true),
@@ -133,7 +133,7 @@ function clockBar() {
     <div class="t" id="clk" data-act="editclock">${fmt(rem())}</div><div class="sp"></div>
     <button class="btn pri" id="runbtn" data-act="clock" style="min-width:92px;min-height:46px">${g.clock_since ? '⏸ Stop' : '▶ Start'}</button><button class="btn sm" data-act="clockpower" title="Turn clock off">⏱ On</button></div>`;
 }
-const TABS = [['notes', '🎙', 'Notes'], ['ice', '🧊', 'Ice'], ['faceoff', '⚪️', 'Faceoff'], ['stats', '＋', 'Stats'], ['log', '☰', 'Log'], ['more', '⚙︎', 'More']];
+const TABS = [['notes', '🎙', 'Notes'], ['ice', '🧊', 'Ice'], ['faceoff', '⚪️', 'Faceoff'], ['stats', '＋', 'Stats'], ['more', '⚙︎', 'More']];
 const nav = () => `<nav class="tabs glass">${TABS.map(([k, i, l]) => `<button data-act="tab" data-id="${k}" class="${S.tab === k ? 'on' : ''}"><span>${i}</span>${l}</button>`).join('')}</nav>`;
 
 function aboutChips() {
@@ -259,19 +259,37 @@ function logView() {
   <div class="card glass" style="padding:0">${list.map((e) => `<div class="note row"><div style="flex:1" ${e.type === 'note' ? `data-act="editnote" data-id="${e.cid}"` : ''}><span class="pill">${tstamp(S.game, e)}</span>${label(e)}</div><button class="btn sm danger" data-act="del" data-id="${e.cid}">✕</button></div>`).join('') || '<div class="note hint">Empty.</div>'}</div>`;
 }
 
+const SECS = [['game', 'This game'], ['games', 'Games'], ['roster', 'Roster'], ['other', 'Other']];
 function moreView() {
   const g = S.game;
-  return `${g ? `<div class="card glass"><h3>This game</h3><div class="row" style="flex-wrap:wrap">
+  if (!g && S.sec === 'game') S.sec = 'games';
+  const secs = SECS.filter(([k]) => g || k !== 'game');
+  const body = { game: secGame, games: secGames, roster: secRoster, other: secOther }[S.sec]();
+  return `<div class="seg" style="margin-bottom:10px">${secs.map(([k, l]) => `<button class="${S.sec === k ? 'on' : ''}" data-act="sec" data-id="${k}">${l}</button>`).join('')}</div>${body}`;
+}
+
+function secGame() {
+  const g = S.game;
+  return `<div class="card glass"><h3>This game</h3><div class="row" style="flex-wrap:wrap">
       <button class="btn" data-act="export">Show markdown</button>
       <button class="btn" data-act="download">Download .md</button>
       <button class="btn" data-act="clockpower">Clock: ${clockOn(g) ? 'On' : 'Off'}</button>
       <button class="btn" data-act="finish">${g.status === 'final' ? 'Reopen' : 'End game'}</button></div>
-      ${S.exportText ? `<pre>${esc(S.exportText)}</pre>` : ''}</div>` : ''}
-  <div class="card glass"><h3>New game</h3><div class="grid">
+      ${S.exportText ? `<pre>${esc(S.exportText)}</pre>` : ''}</div>
+  <h3 style="margin:14px 2px 8px">Log</h3>${logView()}`;
+}
+
+function secGames() {
+  return `<div class="card glass"><h3>New game</h3><div class="grid">
     <input id="g_opp" placeholder="Opponent"><div class="grid g2"><input id="g_date" type="date" value="${new Date().toISOString().slice(0, 10)}"><input id="g_len" type="number" value="15" inputmode="numeric" placeholder="Period min"></div>
     <input id="g_loc" placeholder="Location (optional)"><label class="hint row"><input type="checkbox" id="g_clk" ${S.clockDefault ? 'checked' : ''} style="width:auto"> Use game clock (periods are always tracked)</label><button class="btn pri" data-act="newgame">Start game</button></div></div>
-  <div class="card glass"><h3>Games</h3>${S.games.map((x) => `<div class="note row"><div style="flex:1">${esc(x.date)} vs ${esc(x.opponent)} <span class="meta">${x.status}</span></div><button class="btn sm" data-act="opengame" data-id="${x.id}">Open</button></div>`).join('') || '<div class="hint">None yet.</div>'}</div>
-  <div class="card glass"><h3>Roster</h3>${S.players.map((p) => `<div class="note row"><input class="pnum" data-pf="number" data-id="${p.id}" value="${esc(p.number)}" placeholder="#" inputmode="numeric"><div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(p.name)}</div>
+  <div class="card glass"><h3>Games</h3>${S.games.map((x) => `<div class="note row"><div style="flex:1">${esc(x.date)} vs ${esc(x.opponent)} <span class="meta">${x.status}</span></div>${S.delGame === x.id
+    ? `<button class="btn sm danger" data-act="delgame" data-id="${x.id}">Confirm delete</button><button class="btn sm" data-act="delgamecancel">Cancel</button>`
+    : `<button class="btn sm" data-act="opengame" data-id="${x.id}">Open</button><button class="btn sm danger" data-act="delgameask" data-id="${x.id}">Delete</button>`}</div>`).join('') || '<div class="hint">None yet.</div>'}</div>`;
+}
+
+function secRoster() {
+  return `<div class="card glass"><h3>Roster</h3>${S.players.map((p) => `<div class="note row"><input class="pnum" data-pf="number" data-id="${p.id}" value="${esc(p.number)}" placeholder="#" inputmode="numeric"><div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(p.name)}</div>
     <select class="ppos" data-pf="position" data-id="${p.id}">${['', 'C', 'F', 'D', 'G'].map((o) => `<option value="${o}" ${p.position === o ? 'selected' : ''}>${o || '—'}</option>`).join('')}</select>
     <button class="btn sm" data-act="star" data-id="${p.id}">${p.focus ? '★' : '☆'}</button><button class="btn sm danger" data-act="delplayer" data-id="${p.id}">✕</button></div>`).join('')}
     <div class="grid" style="margin-top:10px"><div class="grid g3" style="grid-template-columns:2fr 1fr 1fr"><input id="p_name" placeholder="Name"><input id="p_num" placeholder="#" inputmode="numeric"><select id="p_pos"><option>C</option><option>F</option><option>D</option><option>G</option></select></div>
@@ -281,9 +299,10 @@ function moreView() {
     <textarea id="imp" style="min-height:90px;font-size:14px" placeholder="Paste roster here…">${esc(S.impText)}</textarea>
     <button class="btn" data-act="imppreview" style="margin-top:8px;width:100%">Preview</button>
     ${S.impRows.length ? `<div style="margin-top:10px">${S.impRows.map((r, i) => `<div class="note row"><div style="flex:1">${esc(r.number ? '#' + r.number + ' ' : '')}${esc(r.name)} <span class="meta">${esc(r.position || '—')}</span></div><button class="btn sm" data-act="impstar" data-id="${i}">${r.focus ? '★' : '☆'}</button><button class="btn sm danger" data-act="impdrop" data-id="${i}">✕</button></div>`).join('')}
-    <button class="btn pri" data-act="impgo" style="margin-top:10px;width:100%">Import ${S.impRows.length} players</button></div>` : ''}</div>
-  <div class="card glass"><h3>Claude / Obsidian</h3><div class="hint">MCP endpoint: <b>${location.origin}/mcp</b><br>Add: <code>claude mcp add --transport http hockey ${location.origin}/mcp</code></div></div>`;
+    <button class="btn pri" data-act="impgo" style="margin-top:10px;width:100%">Import ${S.impRows.length} players</button></div>` : ''}</div>`;
 }
+
+const secOther = () => `<div class="card glass"><h3>Claude / Obsidian</h3><div class="hint">MCP endpoint: <b>${location.origin}/mcp</b><br>Add: <code>claude mcp add --transport http hockey ${location.origin}/mcp</code></div></div>`;
 
 const CLK_COLS = [[0, 1], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], null, [0, 1, 2, 3, 4, 5], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]];
 function clockOverlay() {
@@ -300,7 +319,7 @@ function clockOverlay() {
 
 function render() {
   const keep = $('#main')?.scrollTop || 0;
-  const body = !S.game && S.tab !== 'more' ? moreView() : ({ notes: notesView, ice: iceView, faceoff: foView, stats: statsView, log: logView, more: moreView }[S.tab])();
+  const body = !S.game && S.tab !== 'more' ? moreView() : ({ notes: notesView, ice: iceView, faceoff: foView, stats: statsView, more: moreView }[S.tab])();
   $('#app').innerHTML = header() + clockBar() + clockOverlay() + `<main id="main">${body}</main>` + nav() + pickerOverlay() + (S.tab === 'stats' ? statPickOverlay() : '');
   $('#main').scrollTop = keep; syncBadge();
 }
@@ -375,6 +394,20 @@ async function loadGame(id) {
 
 const A = {
   tab: (id) => { S.tab = id; },
+  sec: (id) => { S.sec = id; S.delGame = null; },
+  delgameask: (id) => { S.delGame = +id; },
+  delgamecancel: () => { S.delGame = null; },
+  delgame: async (id) => {
+    id = +id; S.delGame = null;
+    if (id < 0) { toast('Game not synced yet — try again once online'); return; }
+    await api('DELETE', `/api/games/${id}`);
+    S.games = S.games.filter((x) => x.id !== id);
+    if (S.game?.id === id) {
+      const next = S.games.find((x) => x.status === 'active') || S.games[0];
+      if (next) await loadGame(next.id); else { S.game = null; S.events = []; ls.set('ht_game', null); }
+    }
+    cache();
+  },
   namemode: () => { const i = NAME_MODES.findIndex(([k]) => k === S.nameMode); S.nameMode = NAME_MODES[(i + 1) % NAME_MODES.length][0]; ls.set('ht_name_mode', S.nameMode); },
   about: (id, el) => { const n = +id; S.composer.about.has(n) ? S.composer.about.delete(n) : S.composer.about.add(n); el.classList.toggle('on'); return false; },
   mic: () => { toggleMic(); return false; },

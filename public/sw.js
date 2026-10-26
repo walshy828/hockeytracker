@@ -1,4 +1,4 @@
-const C = 'ht-v9';
+const C = 'ht-v10';
 const SHELL = ['/', '/app.js', '/summary.js', '/rosterimport.js', '/style.css', '/icon.svg', '/manifest.webmanifest'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(C).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))));
