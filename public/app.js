@@ -11,7 +11,7 @@ const rid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toStr
 
 const S = {
   players: [], games: [], game: null, events: [],
-  impText: '', impRows: [], tab: 'notes', sec: 'game', delGame: null, logFilter: 'all', exportText: '',
+  impText: '', impRows: [], tab: 'notes', sec: 'game', theme: ls.get('ht_theme', 'system'), accent: ls.get('ht_accent', '#4f9bff'), delGame: null, logFilter: 'all', exportText: '',
   composer: { text: '', about: new Set(), stamp: null, voice: false },
   clk: null, perMenu: false, pick: null, foSel: null, foFmt: 'ratio', foZone: 'N', statSel: 0, statPick: false,
   outbox: ls.get('ht_outbox', []), clockDefault: ls.get('ht_clock_default', false), autosave: ls.get('ht_autosave', true),
@@ -88,6 +88,13 @@ function removeEvent(cid) {
   if (i >= 0) { S.outbox.splice(i, 1); save(); } else queue({ method: 'DELETE', url: `/api/events/${cid}`, body: {} });
   cache();
 }
+// two-tap delete: first tap arms for 3s, second tap within that window confirms
+function arm(key) {
+  if (S.armed === key) { clearTimeout(arm.t); S.armed = null; return true; }
+  S.armed = key; clearTimeout(arm.t);
+  arm.t = setTimeout(() => { S.armed = null; render(); }, 3000);
+  return false;
+}
 const undoable = (msg, e) => toast(msg, () => { removeEvent(e.cid); render(); });
 function toast(msg, undo) {
   const t = $('#toast'); t.hidden = false;
@@ -119,19 +126,11 @@ const foPlayers = () => { const l = [...centers(), ...forwards()]; return l.leng
 function header() {
   const g = S.game;
   const sc = g ? computeGame(g, S.players, S.events, rem()).team : null;
-  return `<header class="top glass" style="margin:8px 10px 0;padding:10px 12px"><div class="hrow">
+  const per = g ? `<div class="perwrap"><div class="per" data-act="permenu">${periodLabel(g.period)} ${S.perMenu ? '▾' : '▸'}</div>${S.perMenu ? `<div class="permenu glass">${[1, 2, 3, 4].map((p) => `<button class="${p === g.period ? 'on' : ''}" data-act="period" data-id="${p}">${periodLabel(p)}</button>`).join('')}</div>` : ''}</div>` : '';
+  const clk = g && clockOn(g) ? `<div class="t" id="clk" data-act="editclock">${fmt(rem())}</div><button class="btn pri runbtn" id="runbtn" data-act="clock" aria-label="Start or stop clock">${g.clock_since ? '⏸' : '▶'}</button>` : '';
+  return `<header class="top glass" style="margin:8px 10px 0"><div class="hrow">${per}${clk}
     <div class="title">${g ? `vs ${esc(g.opponent)}` : 'Hockey Tracker'}<small>${g ? esc(g.date) + (g.status === 'final' ? ' · FINAL' : '') : 'Create a game in ⚙︎'}</small></div>
-    <button class="btn sm" data-act="namemode" title="Player button labels">${NAME_MODES.find(([k]) => k === S.nameMode)[1]}</button><span class="sync" id="sync"></span>${sc ? `<div class="score">${sc.gf}–${sc.ga}<small class="meta" style="display:block;text-align:right">SOG ${sc.sf}–${sc.sa}</small></div>` : ''}</div></header>`;
-}
-function clockBar() {
-  if (!S.game) return '';
-  const g = S.game;
-  const per = `<div class="perwrap"><div class="per" data-act="permenu">${periodLabel(g.period)} ${S.perMenu ? '▾' : '▸'}</div>${S.perMenu ? `<div class="permenu glass">${[1, 2, 3, 4].map((p) => `<button class="${p === g.period ? 'on' : ''}" data-act="period" data-id="${p}">${periodLabel(p)}</button>`).join('')}</div>` : ''}</div>`;
-  if (!clockOn(g)) return `<div class="clock glass" style="margin-top:8px">${per}<div class="sp"></div><button class="btn sm" data-act="clockpower">⏱ Clock off</button></div>`;
-  return `<div class="clock glass" style="margin-top:8px">
-    <div class="perwrap"><div class="per" data-act="permenu">${periodLabel(g.period)} ${S.perMenu ? '▾' : '▸'}</div>${S.perMenu ? `<div class="permenu glass">${[1, 2, 3, 4].map((p) => `<button class="${p === g.period ? 'on' : ''}" data-act="period" data-id="${p}">${periodLabel(p)}</button>`).join('')}</div>` : ''}</div>
-    <div class="t" id="clk" data-act="editclock">${fmt(rem())}</div><div class="sp"></div>
-    <button class="btn pri" id="runbtn" data-act="clock" style="min-width:92px;min-height:46px">${g.clock_since ? '⏸ Stop' : '▶ Start'}</button><button class="btn sm" data-act="clockpower" title="Turn clock off">⏱ On</button></div>`;
+    <span class="sync" id="sync"></span>${sc ? `<div class="score">${sc.gf}–${sc.ga}<small class="meta">SOG ${sc.sf}–${sc.sa}</small></div>` : ''}</div></header>`;
 }
 const TABS = [['notes', '🎙', 'Notes'], ['ice', '🧊', 'Ice'], ['faceoff', '⚪️', 'Faceoff'], ['stats', '＋', 'Stats'], ['more', '⚙︎', 'More']];
 const nav = () => `<nav class="tabs glass">${TABS.map(([k, i, l]) => `<button data-act="tab" data-id="${k}" class="${S.tab === k ? 'on' : ''}"><span>${i}</span>${l}</button>`).join('')}</nav>`;
@@ -256,15 +255,15 @@ function logView() {
     return 'Period ended';
   };
   return `<div class="seg" style="margin-bottom:10px">${['all', 'notes', 'other'].map((k) => `<button class="${f === k ? 'on' : ''}" data-act="logf" data-id="${k}">${k}</button>`).join('')}</div>
-  <div class="card glass" style="padding:0">${list.map((e) => `<div class="note row"><div style="flex:1" ${e.type === 'note' ? `data-act="editnote" data-id="${e.cid}"` : ''}><span class="pill">${tstamp(S.game, e)}</span>${label(e)}</div><button class="btn sm danger" data-act="del" data-id="${e.cid}">✕</button></div>`).join('') || '<div class="note hint">Empty.</div>'}</div>`;
+  <div class="card glass" style="padding:0">${list.map((e) => `<div class="note row"><div style="flex:1" ${e.type === 'note' ? `data-act="editnote" data-id="${e.cid}"` : ''}><span class="pill">${tstamp(S.game, e)}</span>${label(e)}</div><button class="btn sm danger" data-act="del" data-id="${e.cid}">${S.armed === `ev${e.cid}` ? 'Confirm?' : '✕'}</button></div>`).join('') || '<div class="note hint">Empty.</div>'}</div>`;
 }
 
-const SECS = [['game', 'This game'], ['games', 'Games'], ['roster', 'Roster'], ['other', 'Other']];
+const SECS = [['game', 'This game'], ['games', 'Games'], ['roster', 'Roster'], ['settings', 'Settings']];
 function moreView() {
   const g = S.game;
   if (!g && S.sec === 'game') S.sec = 'games';
   const secs = SECS.filter(([k]) => g || k !== 'game');
-  const body = { game: secGame, games: secGames, roster: secRoster, other: secOther }[S.sec]();
+  const body = { game: secGame, games: secGames, roster: secRoster, settings: secSettings }[S.sec]();
   return `<div class="seg" style="margin-bottom:10px">${secs.map(([k, l]) => `<button class="${S.sec === k ? 'on' : ''}" data-act="sec" data-id="${k}">${l}</button>`).join('')}</div>${body}`;
 }
 
@@ -273,7 +272,6 @@ function secGame() {
   return `<div class="card glass"><h3>This game</h3><div class="row" style="flex-wrap:wrap">
       <button class="btn" data-act="export">Show markdown</button>
       <button class="btn" data-act="download">Download .md</button>
-      <button class="btn" data-act="clockpower">Clock: ${clockOn(g) ? 'On' : 'Off'}</button>
       <button class="btn" data-act="finish">${g.status === 'final' ? 'Reopen' : 'End game'}</button></div>
       ${S.exportText ? `<pre>${esc(S.exportText)}</pre>` : ''}</div>
   <h3 style="margin:14px 2px 8px">Log</h3>${logView()}`;
@@ -291,7 +289,7 @@ function secGames() {
 function secRoster() {
   return `<div class="card glass"><h3>Roster</h3>${S.players.map((p) => `<div class="note row"><input class="pnum" data-pf="number" data-id="${p.id}" value="${esc(p.number)}" placeholder="#" inputmode="numeric"><div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(p.name)}</div>
     <select class="ppos" data-pf="position" data-id="${p.id}">${['', 'C', 'F', 'D', 'G'].map((o) => `<option value="${o}" ${p.position === o ? 'selected' : ''}>${o || '—'}</option>`).join('')}</select>
-    <button class="btn sm" data-act="star" data-id="${p.id}">${p.focus ? '★' : '☆'}</button><button class="btn sm danger" data-act="delplayer" data-id="${p.id}">✕</button></div>`).join('')}
+    <button class="btn sm" data-act="star" data-id="${p.id}">${p.focus ? '★' : '☆'}</button><button class="btn sm danger" data-act="delplayer" data-id="${p.id}">${S.armed === `pl${p.id}` ? 'Confirm?' : '✕'}</button></div>`).join('')}
     <div class="grid" style="margin-top:10px"><div class="grid g3" style="grid-template-columns:2fr 1fr 1fr"><input id="p_name" placeholder="Name"><input id="p_num" placeholder="#" inputmode="numeric"><select id="p_pos"><option>C</option><option>F</option><option>D</option><option>G</option></select></div>
     <label class="hint row"><input type="checkbox" id="p_focus" style="width:auto"> Focus player (★ your son — pinned first)</label><button class="btn pri" data-act="addplayer">Add player</button></div></div>
   <div class="card glass"><h3>Import roster (TeamSnap)</h3>
@@ -302,7 +300,18 @@ function secRoster() {
     <button class="btn pri" data-act="impgo" style="margin-top:10px;width:100%">Import ${S.impRows.length} players</button></div>` : ''}</div>`;
 }
 
-const secOther = () => `<div class="card glass"><h3>Claude / Obsidian</h3><div class="hint">MCP endpoint: <b>${location.origin}/mcp</b><br>Add: <code>claude mcp add --transport http hockey ${location.origin}/mcp</code></div></div>`;
+const SWATCHES = ['#4f9bff', '#22c55e', '#ef4444', '#f97316', '#eab308', '#ec4899', '#8b5cf6', '#14b8a6'];
+const secSettings = () => `<div class="card glass"><h3>Game display</h3>
+  <div class="hint" style="margin-bottom:6px">Player button labels</div>
+  <div class="seg">${NAME_MODES.map(([k, l]) => `<button class="${S.nameMode === k ? 'on' : ''}" data-act="namemode" data-id="${k}">${l}</button>`).join('')}</div>
+  ${S.game ? `<label class="hint row" style="margin-top:12px"><input type="checkbox" data-act="clockpower" ${clockOn(S.game) ? 'checked' : ''} style="width:auto"> Show game clock for this game</label>` : ''}</div>
+  <div class="card glass"><h3>Appearance</h3>
+  <div class="seg">${[['system', 'System'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => `<button class="${S.theme === k ? 'on' : ''}" data-act="theme" data-id="${k}">${l}</button>`).join('')}</div></div>
+  <div class="card glass"><h3>Accent color</h3>
+  <div class="swatches">${SWATCHES.map((c) => `<button class="swatch ${S.accent.toLowerCase() === c ? 'on' : ''}" style="background:${c}" data-act="accent" data-id="${c}" aria-label="${c}"></button>`).join('')}</div>
+  <div class="row" style="margin-top:12px"><input type="color" id="acc_pick" value="${S.accent}" aria-label="Pick a color"><input id="acc_hex" value="${S.accent}" maxlength="7" placeholder="#4f9bff" autocapitalize="off" spellcheck="false"></div>
+  <div class="hint" style="margin-top:6px">Pick a color or type a hex code.</div></div>
+  <div class="card glass"><h3>Claude / Obsidian</h3><div class="hint">MCP endpoint: <b>${location.origin}/mcp</b><br>Add: <code>claude mcp add --transport http hockey ${location.origin}/mcp</code></div></div>`;
 
 const CLK_COLS = [[0, 1], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], null, [0, 1, 2, 3, 4, 5], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]];
 function clockOverlay() {
@@ -320,7 +329,7 @@ function clockOverlay() {
 function render() {
   const keep = $('#main')?.scrollTop || 0;
   const body = !S.game && S.tab !== 'more' ? moreView() : ({ notes: notesView, ice: iceView, faceoff: foView, stats: statsView, more: moreView }[S.tab])();
-  $('#app').innerHTML = header() + clockBar() + clockOverlay() + `<main id="main">${body}</main>` + nav() + pickerOverlay() + (S.tab === 'stats' ? statPickOverlay() : '');
+  $('#app').innerHTML = header() + clockOverlay() + `<main id="main">${body}</main>` + nav() + pickerOverlay() + (S.tab === 'stats' ? statPickOverlay() : '');
   $('#main').scrollTop = keep; syncBadge();
 }
 
@@ -392,13 +401,28 @@ async function loadGame(id) {
   S.game = d.game; S.events = d.events; ls.set('ht_game', id); cache();
 }
 
+const HEX = /^#[0-9a-f]{6}$/i;
+const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
+function applyTheme() {
+  const dark = S.theme === 'dark' || (S.theme === 'system' && (mq ? mq.matches : true));
+  const root = document.documentElement;
+  root.dataset.theme = dark ? 'dark' : 'light';
+  root.style.setProperty('--acc', S.accent);
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#0b1020' : '#eef1fb');
+}
+function setAccent(c) { S.accent = c.toLowerCase(); ls.set('ht_accent', S.accent); applyTheme(); }
+mq?.addEventListener?.('change', applyTheme);
+applyTheme();
+
 const A = {
   tab: (id) => { S.tab = id; },
+  theme: (id) => { S.theme = id; ls.set('ht_theme', id); applyTheme(); },
+  accent: (id) => { setAccent(id); },
   sec: (id) => { S.sec = id; S.delGame = null; },
-  delgameask: (id) => { S.delGame = +id; },
+  delgameask: (id) => { S.delGame = +id; clearTimeout(arm.g); arm.g = setTimeout(() => { S.delGame = null; render(); }, 3000); },
   delgamecancel: () => { S.delGame = null; },
   delgame: async (id) => {
-    id = +id; S.delGame = null;
+    id = +id; S.delGame = null; clearTimeout(arm.g);
     if (id < 0) { toast('Game not synced yet — try again once online'); return; }
     await api('DELETE', `/api/games/${id}`);
     S.games = S.games.filter((x) => x.id !== id);
@@ -406,9 +430,9 @@ const A = {
       const next = S.games.find((x) => x.status === 'active') || S.games[0];
       if (next) await loadGame(next.id); else { S.game = null; S.events = []; ls.set('ht_game', null); }
     }
-    cache();
+    cache(); toast('Game deleted');
   },
-  namemode: () => { const i = NAME_MODES.findIndex(([k]) => k === S.nameMode); S.nameMode = NAME_MODES[(i + 1) % NAME_MODES.length][0]; ls.set('ht_name_mode', S.nameMode); },
+  namemode: (id) => { S.nameMode = id; ls.set('ht_name_mode', S.nameMode); },
   about: (id, el) => { const n = +id; S.composer.about.has(n) ? S.composer.about.delete(n) : S.composer.about.add(n); el.classList.toggle('on'); return false; },
   mic: () => { toggleMic(); return false; },
   savenote: () => { saveNote(); return false; },
@@ -465,9 +489,9 @@ const A = {
   stat: (k) => { const who = S.statSel ? first(S.statSel) : 'Unknown'; const e = addEvent('stat', S.statSel || null, { stat: k }); S.statSel = 0; navigator.vibrate?.(15); render(); undoable(`${who} +${STATS[k]}`, e); return false; },
   tstat: (k) => { const e = addEvent('stat', null, { stat: k }); render(); undoable(TEAM_STATS[k], e); return false; },
   logf: (id) => { S.logFilter = id; },
-  del: (cid) => { removeEvent(cid); },
-  editnote: (cid) => { const e = S.events.find((x) => x.cid === cid); const t = prompt('Edit note', e.data.text); if (t == null) return false; e.data.text = t; queue({ method: 'PATCH', url: `/api/events/${cid}`, body: { data: { text: t } } }); cache(); },
-  export: async () => { S.exportText = gameMarkdown(S.game, S.players, S.events, rem()); try { await navigator.clipboard.writeText(S.exportText); toast('Copied to clipboard'); } catch {} },
+  del: (cid) => { if (!arm(`ev${cid}`)) return; removeEvent(cid); toast('Log entry deleted'); },
+  editnote: (cid) => { const e = S.events.find((x) => x.cid === cid); const t = prompt('Edit note', e.data.text); if (t == null) return false; e.data.text = t; queue({ method: 'PATCH', url: `/api/events/${cid}`, body: { data: { text: t } } }); cache(); toast('Note updated'); },
+  export: async () => { S.exportText = gameMarkdown(S.game, S.players, S.events, rem()); try { await navigator.clipboard.writeText(S.exportText); toast('Copied to clipboard'); } catch { toast('Copy failed'); } },
   download: () => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([gameMarkdown(S.game, S.players, S.events, rem())], { type: 'text/markdown' }));
@@ -476,6 +500,7 @@ const A = {
   finish: async () => {
     const g = S.game;
     if (g.status !== 'final') { const st = snap(); closeShifts(st); setClock({ status: 'final', clock_s: rem(), clock_since: null }); } else setClock({ status: 'active' });
+    toast(S.game.status === 'final' ? 'Game finalised' : 'Game reopened');
   },
   newgame: async () => {
     const body = { opponent: $('#g_opp').value.trim() || 'Opponent', date: $('#g_date').value, location: $('#g_loc').value, period_len: (+$('#g_len').value || 15) * 60, clock_enabled: $('#g_clk').checked ? 1 : 0 };
@@ -488,12 +513,12 @@ const A = {
       queue({ method: 'POST', url: '/api/games', body, tmp: g.id });
     }
     S.clockDefault = $('#g_clk').checked; ls.set('ht_clock_default', S.clockDefault);
-    S.games.unshift(g); await loadGame(g.id); S.tab = 'notes'; S.composer = { text: '', about: new Set(), stamp: null, voice: false };
+    S.games.unshift(g); await loadGame(g.id); S.tab = 'notes'; S.composer = { text: '', about: new Set(), stamp: null, voice: false }; toast('Game started');
   },
   opengame: async (id) => { await loadGame(id); S.tab = 'notes'; S.exportText = ''; },
   addplayer: async () => {
     const name = $('#p_name').value.trim(); if (!name) return false;
-    await api('POST', '/api/players', { name, number: $('#p_num').value, position: $('#p_pos').value, focus: $('#p_focus').checked }); await loadPlayers();
+    await api('POST', '/api/players', { name, number: $('#p_num').value, position: $('#p_pos').value, focus: $('#p_focus').checked }); await loadPlayers(); toast(`${name} added`);
   },
   imppreview: () => { S.impText = $('#imp').value; S.impRows = parseRoster(S.impText); if (!S.impRows.length) toast('Nothing recognised — paste the full TeamSnap list'); },
   impstar: (i) => { const r = S.impRows[+i]; const was = r.focus; S.impRows.forEach((x) => (x.focus = false)); r.focus = !was; },
@@ -503,10 +528,11 @@ const A = {
     await loadPlayers(); S.impRows = []; S.impText = '';
     toast(`Imported ${r.added}${r.skipped ? `, skipped ${r.skipped} already on roster` : ''}`);
   },
-  star: (id) => { const p = S.players.find((x) => x.id === +id); p.focus = p.focus ? 0 : 1; queue({ key: `p${id}:focus`, method: 'PATCH', url: `/api/players/${id}`, body: { focus: p.focus } }); cache(); },
+  star: (id) => { const p = S.players.find((x) => x.id === +id); p.focus = p.focus ? 0 : 1; queue({ key: `p${id}:focus`, method: 'PATCH', url: `/api/players/${id}`, body: { focus: p.focus } }); cache(); toast(p.focus ? `${p.name} starred` : `${p.name} unstarred`); },
   delplayer: (id) => {
-    if (!confirm('Remove player?')) return false;
-    S.players = S.players.filter((x) => x.id !== +id); queue({ method: 'DELETE', url: `/api/players/${id}`, body: {} }); cache();
+    if (!arm(`pl${id}`)) return;
+    const nm = pname(+id);
+    S.players = S.players.filter((x) => x.id !== +id); queue({ method: 'DELETE', url: `/api/players/${id}`, body: {} }); cache(); toast(`${nm} removed`);
   },
 };
 const LP = {
@@ -535,15 +561,18 @@ document.addEventListener('click', async (e) => {
   } catch (err) { toast('Error: ' + err.message); }
 });
 document.addEventListener('change', (e) => {
+  if (e.target.id === 'acc_pick' || e.target.id === 'acc_hex') { render(); return; }
   const f = e.target.dataset?.pf; if (!f) return;
   const id = +e.target.dataset.id; const v = e.target.value.trim();
   const p = S.players.find((x) => x.id === id); if (!p) return;
   p[f] = v; S.players = sortPlayers(S.players);
-  queue({ key: `p${id}:${f}`, method: 'PATCH', url: `/api/players/${id}`, body: { [f]: v } });
+  queue({ key: `p${id}:${f}`, method: 'PATCH', url: `/api/players/${id}`, body: { [f]: v } }); toast(`${p.name} updated`);
   cache(); render();
 });
 document.addEventListener('input', (e) => {
   if (e.target.id === 'nt') { S.composer.text = e.target.value; S.composer.stamp ||= snap(); }
+  if (e.target.id === 'acc_pick') { setAccent(e.target.value); const h = $('#acc_hex'); if (h) h.value = S.accent; document.querySelectorAll('.swatch.on').forEach((x) => x.classList.remove('on')); }
+  if (e.target.id === 'acc_hex') { let v = e.target.value.trim(); if (v && v[0] !== '#') v = '#' + v; if (HEX.test(v)) { setAccent(v); const pk = $('#acc_pick'); if (pk) pk.value = S.accent; } }
   if (e.target.id === 'auto') { S.autosave = e.target.checked; ls.set('ht_autosave', S.autosave); }
 });
 
