@@ -106,3 +106,13 @@ select.ppos{width:72px;padding:8px;flex:none}
 .swatch.on{outline:3px solid var(--txt);outline-offset:2px}
 input[type=color]{width:56px;height:46px;padding:3px;flex:none;cursor:pointer}
 .win,.loss{color:#fff}
+
+.stlog{padding:0;overflow:hidden}
+.sthead,.strow{display:grid;grid-template-columns:42px 58px 1fr 1fr;gap:6px;align-items:center;padding:0 12px}
+.sthead{padding-top:10px;padding-bottom:6px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);border-bottom:1px solid var(--line)}
+.swrow{position:relative;overflow:hidden;border-bottom:1px solid var(--line)}.swrow:last-child{border:0}
+.swdel{position:absolute;right:0;top:0;bottom:0;width:88px;border:0;background:var(--bad);color:#fff;font-weight:700}
+.swin{position:relative;background:var(--sheet2);transition:transform .18s;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+.swrow.open .swin{transform:translateX(-88px)}
+.sc{min-height:46px;display:flex;align-items:center;font-variant-numeric:tabular-nums;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sc.unset{color:var(--mut)}

@@ -13,7 +13,7 @@ const S = {
   players: [], games: [], game: null, events: [],
   impText: '', impRows: [], tab: 'notes', sec: 'game', theme: ls.get('ht_theme', 'system'), accent: ls.get('ht_accent', '#4f9bff'), delGame: null, logFilter: 'all', exportText: '',
   composer: { text: '', about: new Set(), stamp: null, voice: false },
-  clk: null, perMenu: false, pick: null, foSel: null, foFmt: 'ratio', foZone: 'N', statSel: 0, statPick: false,
+  clk: null, perMenu: false, pick: null, foSel: null, foFmt: 'ratio', foZone: 'N', statSel: 0, statPick: false, ed: null, swiped: null,
   outbox: ls.get('ht_outbox', []), clockDefault: ls.get('ht_clock_default', false), autosave: ls.get('ht_autosave', true),
   nameMode: ls.get('ht_name_mode', 'name'),
 };
@@ -86,6 +86,12 @@ function removeEvent(cid) {
   S.events = S.events.filter((e) => e.cid !== cid);
   const i = S.outbox.findIndex((o) => o.method === 'POST' && o.body?.cid === cid && o !== flushing);
   if (i >= 0) { S.outbox.splice(i, 1); save(); } else queue({ method: 'DELETE', url: `/api/events/${cid}`, body: {} });
+  cache();
+}
+function editEvent(cid, p) {
+  const e = S.events.find((x) => x.cid === cid); if (!e) return;
+  const { data, ...rest } = p; Object.assign(e, rest); if (data) e.data = { ...e.data, ...data };
+  queue({ key: `ev:${cid}`, method: 'PATCH', url: `/api/events/${cid}`, body: { period: e.period, remaining: e.remaining, player_id: e.player_id, data: e.data } });
   cache();
 }
 // two-tap delete: first tap arms for 3s, second tap within that window confirms
@@ -240,7 +246,38 @@ function statsView() {
   return `<button class="btn big playerbtn ${sel ? 'on' : ''}" data-act="statpick">${sel ? esc((sel.number ? '#' + sel.number + ' ' : '') + sel.name) : 'Unknown player'}<small>${sel ? esc(sel.position) + ' · tap to change' : 'tap to choose player'}</small></button>
   <div class="grid g3">${Object.entries(STATS).map(([k, l]) => `<button class="btn big" data-act="stat" data-lp="statnote" data-id="${k}">${l}<small>${mine.filter((e) => e.data.stat === k).length}</small></button>`).join('')}</div>
   <div class="hint" style="margin:6px 2px 14px">Tap +1 · hold to add a note about it.</div>
-  <h3>Team</h3><div class="grid g2">${Object.entries(TEAM_STATS).map(([k, l]) => `<button class="btn big" data-act="tstat" data-id="${k}">${l}<small>${tcount(k)}</small></button>`).join('')}</div>`;
+  <h3>Team</h3><div class="grid g2">${Object.entries(TEAM_STATS).map(([k, l]) => `<button class="btn big" data-act="tstat" data-id="${k}">${l}<small>${tcount(k)}</small></button>`).join('')}</div>
+  <h3 style="margin:18px 0 8px">Stat log</h3>${statLog()}`;
+}
+
+const STAT_LABEL = (k) => STATS[k] || TEAM_STATS[k] || k;
+const TEAM_TO_PLAYER = { goal_for: 'goal', shot_for: 'shot', pen_for: 'penalty' };
+const byNumber = (l) => l.slice().sort((a, b) => (parseInt(a.number) || 9999) - (parseInt(b.number) || 9999) || a.name.localeCompare(b.name));
+function statLog() {
+  const list = S.events.filter((e) => e.type === 'stat' && STAT_LABEL(e.data.stat) !== e.data.stat).reverse();
+  const showT = (e) => clockOn(S.game) || e.data.timed;
+  const row = (e) => {
+    const who = e.player_id ? first(e.player_id) : TEAM_STATS[e.data.stat] ? 'Team' : 'Unknown';
+    const cell = (f, txt, cls = '') => `<div class="sc ${cls}" data-act="logedit" data-id="${e.cid}:${f}">${txt}</div>`;
+    return `<div class="swrow ${S.swiped === e.cid ? 'open' : ''}" data-sw="${e.cid}"><button class="swdel" data-act="delstat" data-id="${e.cid}">${'Delete'}</button>
+      <div class="swin strow">${cell('period', periodLabel(e.period))}${cell('time', showT(e) ? fmt(e.remaining) : 'set', showT(e) ? '' : 'unset')}${cell('player', esc(who))}${cell('stat', esc(STAT_LABEL(e.data.stat)))}</div></div>`;
+  };
+  return `<div class="card glass stlog"><div class="sthead"><div>Per</div><div>Time</div><div>Player</div><div>Activity</div></div>${list.map(row).join('') || '<div class="note hint">Nothing logged yet.</div>'}</div>
+  ${list.length ? '<div class="hint" style="margin:-4px 2px 8px">Tap a cell to edit · swipe a row left to delete.</div>' : ''}`;
+}
+function edOverlay() {
+  const d = S.ed; if (!d) return '';
+  const e = S.events.find((x) => x.cid === d.cid); if (!e) return '';
+  const chip = (act, id, txt, on) => `<div class="chip ${on ? 'on' : ''}" data-act="${act}" data-id="${id}">${txt}</div>`;
+  const cancel = '<div class="row" style="margin-top:12px"><button class="btn" data-act="edcancel" style="flex:1">Cancel</button></div>';
+  let body;
+  if (d.f === 'period') body = `<h3>Period</h3><div class="chips">${[1, 2, 3, 4, 5].map((p) => chip('edper', p, periodLabel(p), e.period === p)).join('')}</div>${cancel}`;
+  else if (d.f === 'player') body = `<h3>Player</h3><div class="chips" style="max-height:55vh;overflow:auto">${chip('edplayer', 0, 'Team / Unknown', !e.player_id)}${byNumber(S.players).map((p) => chip('edplayer', p.id, `${esc(p.number ? '#' + p.number + ' ' : '')}${esc(p.name)}`, e.player_id === p.id)).join('')}</div>${cancel}`;
+  else if (d.f === 'stat') {
+    const keys = [...(e.player_id ? [] : Object.keys(TEAM_STATS)), ...Object.keys(STATS)];
+    body = `<h3>Activity</h3><div class="chips">${keys.map((k) => chip('edstat', k, STAT_LABEL(k), e.data.stat === k)).join('')}</div>${cancel}`;
+  } else body = `<h3>Time remaining${clockOn(S.game) ? '' : ' (clock off)'}</h3>${digCols(d.clk, 'eddig')}<div class="row" style="margin-top:12px"><button class="btn pri" data-act="edtime" style="flex:1">Set</button><button class="btn" data-act="edcancel" style="flex:1">Cancel</button></div>`;
+  return `<div class="overlay" data-act="edcancel"><div class="sheet glass" data-keep="1">${body}</div></div>`;
 }
 
 function logView() {
@@ -314,22 +351,24 @@ const secSettings = () => `<div class="card glass"><h3>Game display</h3>
   <div class="card glass"><h3>Claude / Obsidian</h3><div class="hint">MCP endpoint: <b>${location.origin}/mcp</b><br>Add: <code>claude mcp add --transport http hockey ${location.origin}/mcp</code></div></div>`;
 
 const CLK_COLS = [[0, 1], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], null, [0, 1, 2, 3, 4, 5], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]];
-function clockOverlay() {
-  if (!S.clk) return '';
-  const d = S.clk; let di = 0;
-  const cols = CLK_COLS.map((c) => {
+function digCols(d, act) {
+  let di = 0;
+  return `<div class="dcols">${CLK_COLS.map((c) => {
     if (!c) return '<div class="colon">:</div>';
     const i = di++;
-    return `<div class="dcol">${c.map((n) => `<button class="dig ${d[i] === n ? 'on' : ''}" data-act="clkdig" data-id="${i}:${n}">${n}</button>`).join('')}</div>`;
-  }).join('');
-  return `<div class="clkedit glass"><div class="dcols">${cols}</div>
+    return `<div class="dcol">${c.map((n) => `<button class="dig ${d[i] === n ? 'on' : ''}" data-act="${act}" data-id="${i}:${n}">${n}</button>`).join('')}</div>`;
+  }).join('')}</div>`;
+}
+function clockOverlay() {
+  if (!S.clk) return '';
+  return `<div class="clkedit glass">${digCols(S.clk, 'clkdig')}
     <div class="clkbtns"><button class="btn pri" data-act="clkset">Set</button><button class="btn" data-act="clkcancel">Cancel</button></div></div>`;
 }
 
 function render() {
   const keep = $('#main')?.scrollTop || 0;
   const body = !S.game && S.tab !== 'more' ? moreView() : ({ notes: notesView, ice: iceView, faceoff: foView, stats: statsView, more: moreView }[S.tab])();
-  $('#app').innerHTML = header() + clockOverlay() + `<main id="main">${body}</main>` + nav() + pickerOverlay() + (S.tab === 'stats' ? statPickOverlay() : '');
+  $('#app').innerHTML = header() + clockOverlay() + `<main id="main">${body}</main>` + nav() + pickerOverlay() + (S.tab === 'stats' ? statPickOverlay() + edOverlay() : '');
   $('#main').scrollTop = keep; syncBadge();
 }
 
@@ -488,6 +527,24 @@ const A = {
   statsel: (id) => { S.statSel = +id; S.statPick = false; },
   stat: (k) => { const who = S.statSel ? first(S.statSel) : 'Unknown'; const e = addEvent('stat', S.statSel || null, { stat: k }); S.statSel = 0; navigator.vibrate?.(15); render(); undoable(`${who} +${STATS[k]}`, e); return false; },
   tstat: (k) => { const e = addEvent('stat', null, { stat: k }); render(); undoable(TEAM_STATS[k], e); return false; },
+  logedit: (id) => {
+    const i = id.lastIndexOf(':'); const cid = id.slice(0, i); const f = id.slice(i + 1);
+    if (S.swiped) { S.swiped = null; return; }
+    const e = S.events.find((x) => x.cid === cid); if (!e) return;
+    const t = clockOn(S.game) || e.data.timed ? Math.round(e.remaining) : 0; const m = Math.floor(t / 60); const sec = t % 60;
+    S.ed = { cid, f, clk: [Math.floor(m / 10) % 2, m % 10, Math.floor(sec / 10), sec % 10] };
+  },
+  edcancel: () => { S.ed = null; },
+  eddig: (id) => { const [i, n] = id.split(':').map(Number); S.ed.clk[i] = n; },
+  edtime: () => { const [a, b, c, d] = S.ed.clk; editEvent(S.ed.cid, { remaining: (a * 10 + b) * 60 + c * 10 + d, data: { timed: true } }); S.ed = null; },
+  edper: (id) => { editEvent(S.ed.cid, { period: +id }); S.ed = null; },
+  edplayer: (id) => {
+    const e = S.events.find((x) => x.cid === S.ed.cid); const pid = +id || null;
+    if (pid && TEAM_STATS[e.data.stat] && !TEAM_TO_PLAYER[e.data.stat]) { toast(`${TEAM_STATS[e.data.stat]} is a team stat — change the activity first`); return; }
+    editEvent(e.cid, { player_id: pid, ...(pid && TEAM_TO_PLAYER[e.data.stat] ? { data: { stat: TEAM_TO_PLAYER[e.data.stat] } } : {}) }); S.ed = null;
+  },
+  edstat: (k) => { editEvent(S.ed.cid, { data: { stat: k } }); S.ed = null; },
+  delstat: (cid) => { S.swiped = null; removeEvent(cid); toast('Entry deleted'); },
   logf: (id) => { S.logFilter = id; },
   del: (cid) => { if (!arm(`ev${cid}`)) return; removeEvent(cid); toast('Log entry deleted'); },
   editnote: (cid) => { const e = S.events.find((x) => x.cid === cid); const t = prompt('Edit note', e.data.text); if (t == null) return false; e.data.text = t; queue({ method: 'PATCH', url: `/api/events/${cid}`, body: { data: { text: t } } }); cache(); toast('Note updated'); },
@@ -551,7 +608,26 @@ const cancelLp = () => clearTimeout(lpTimer);
 document.addEventListener('pointerup', cancelLp); document.addEventListener('pointercancel', cancelLp);
 document.addEventListener('pointermove', (e) => { if (lpStart && Math.hypot(e.clientX - lpStart[0], e.clientY - lpStart[1]) > 10) cancelLp(); });
 document.addEventListener('contextmenu', (e) => e.preventDefault());
+// swipe a stat-log row left to reveal Delete
+const SW = 88; let sw = null; let swAt = 0;
+document.addEventListener('pointerdown', (e) => {
+  const row = e.target.closest('[data-sw]'); if (!row || e.target.closest('.swdel')) { sw = null; return; }
+  sw = { row, cid: row.dataset.sw, x: e.clientX, y: e.clientY, base: S.swiped === row.dataset.sw ? -SW : 0, off: 0, drag: false };
+});
+document.addEventListener('pointermove', (e) => {
+  if (!sw) return;
+  const dx = e.clientX - sw.x;
+  if (!sw.drag && (Math.abs(dx) < 12 || Math.abs(dx) < Math.abs(e.clientY - sw.y))) return;
+  sw.drag = true; sw.off = Math.max(-SW, Math.min(0, sw.base + dx));
+  const inner = sw.row.querySelector('.swin'); inner.style.transition = 'none'; inner.style.transform = `translateX(${sw.off}px)`;
+});
+const endSwipe = () => {
+  if (sw?.drag) { S.swiped = sw.off < -SW / 2 ? sw.cid : null; swAt = Date.now(); render(); }
+  sw = null;
+};
+document.addEventListener('pointerup', endSwipe); document.addEventListener('pointercancel', endSwipe);
 document.addEventListener('click', async (e) => {
+  if (Date.now() - swAt < 400) return;
   const el = e.target.closest('[data-act]'); if (!el) return;
   if (el.classList.contains('overlay') && e.target !== el) return;
   if (lpFired) { lpFired = false; return; }

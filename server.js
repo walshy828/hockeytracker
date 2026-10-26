@@ -118,7 +118,10 @@ async function api(req, res, url) {
     if (m === 'PATCH') {
       const b = await readBody(req);
       const ev = one('SELECT * FROM events WHERE cid=?', r[1]);
-      if (ev) run('UPDATE events SET data=? WHERE cid=?', JSON.stringify({ ...JSON.parse(ev.data), ...b.data }), r[1]);
+      if (ev) {
+        run('UPDATE events SET data=?, period=?, remaining=?, player_id=? WHERE cid=?', JSON.stringify({ ...JSON.parse(ev.data), ...b.data }),
+          b.period ?? ev.period, b.remaining ?? ev.remaining, 'player_id' in b ? b.player_id : ev.player_id, r[1]);
+      }
       return json(res, 200, { ok: true });
     }
   }

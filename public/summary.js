@@ -7,7 +7,7 @@ export const fmt = (s) => {
 
 /** Period label, plus the game-clock time only when the game was tracked with the clock on. */
 export const clockOn = (game) => game?.clock_enabled !== 0;
-export const tstamp = (game, e) => (clockOn(game) ? `${periodLabel(e.period)} ${fmt(e.remaining)}` : periodLabel(e.period));
+export const tstamp = (game, e) => (clockOn(game) || e.data?.timed ? `${periodLabel(e.period)} ${fmt(e.remaining)}` : periodLabel(e.period));
 
 export const RESULTS = {
   clean_win: 'Clean win',
