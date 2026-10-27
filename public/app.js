@@ -13,7 +13,7 @@ const S = {
   players: [], games: [], game: null, events: [],
   impText: '', impRows: [], tab: 'notes', sec: 'game', theme: ls.get('ht_theme', 'system'), accent: ls.get('ht_accent', '#4f9bff'), delGame: null, logFilter: 'all', exportText: '',
   composer: { text: '', about: new Set(), stamp: null, voice: false },
-  clk: null, perMenu: false, pick: null, foSel: null, foFmt: 'ratio', foZone: 'N', statSel: 0, statPick: false, ed: null, swiped: null,
+  clk: null, perMenu: false, pick: null, foSel: null, foFmt: 'ratio', foZone: 'N', foPt: null, rinkAll: false, locCid: null, team: ls.get('ht_team', 'Us'), statSel: 0, statPick: false, ed: null, swiped: null,
   outbox: ls.get('ht_outbox', []), clockDefault: ls.get('ht_clock_default', false), autosave: ls.get('ht_autosave', true),
   nameMode: ls.get('ht_name_mode', 'name'),
 };
@@ -83,6 +83,7 @@ function addEvent(type, player_id, data = {}, stamp = snap()) {
   return e;
 }
 function removeEvent(cid) {
+  if (S.locCid === cid) S.locCid = null;
   S.events = S.events.filter((e) => e.cid !== cid);
   const i = S.outbox.findIndex((o) => o.method === 'POST' && o.body?.cid === cid && o !== flushing);
   if (i >= 0) { S.outbox.splice(i, 1); save(); } else queue({ method: 'DELETE', url: `/api/events/${cid}`, body: {} });
@@ -198,6 +199,38 @@ function statPickOverlay() {
     <div class="row" style="margin-top:12px"><button class="btn" data-act="statpickcancel" style="flex:1">Cancel</button></div></div></div>`;
 }
 
+
+// ---------- rink ----------
+// Points are stored in one fixed frame (x: 0 = our defensive end, 1 = our offensive end; y: 0..1) so a
+// per-period "swap sides" only changes how they are drawn (180° turn), never the saved data.
+const LOC_STATS = new Set(['shot', 'goal', 'shot_for', 'goal_for', 'shot_against', 'goal_against']);
+const flipsOf = (g) => { try { return JSON.parse(g.flips || '{}') || {}; } catch { return {}; } };
+const zoneAt = (x) => (x > 0.625 ? 'O' : x < 0.375 ? 'D' : 'N');
+function rinkCard(title, pts, hint) {
+  const f = !S.rinkAll && !!flipsOf(S.game)[S.game.period];
+  const P = (x, y) => [(f ? 1 - x : x) * 200, (f ? 1 - y : y) * 85];
+  const left = f ? 'O' : 'D'; const right = f ? 'D' : 'O';
+  const lab = (z, cx) => {
+    const t = z === 'O' ? ['OFFENSIVE ZONE', S.game.opponent] : ['DEFENSIVE ZONE', S.team];
+    return `<text x="${cx}" y="40" text-anchor="middle" class="rz">${t[0]}</text><text x="${cx}" y="50" text-anchor="middle" class="rz rzn">${esc(t[1])}</text>`;
+  };
+  const dot = (x, y) => `<circle cx="${x}" cy="${y}" r="1.2" class="rl rf"/>`;
+  const marks = pts.map((p) => { const [cx, cy] = P(p.x, p.y); return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${p.goal ? 3.4 : p.small ? 1.8 : 2.4}" class="rp ${p.cls}${p.goal ? ' goal' : ''}"/>`; }).join('');
+  return `<div class="card glass"><div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">${title} · ${S.rinkAll ? 'All periods' : periodLabel(S.game.period)}</h3>
+    ${S.rinkAll ? '' : `<button class="btn sm" data-act="swapsides">⇄ Swap sides${f ? ' ✓' : ''}</button>`}</div>
+  <div class="seg" style="margin-bottom:8px"><button class="${S.rinkAll ? '' : 'on'}" data-act="rinkview" data-id="cur">This period (as entered)</button><button class="${S.rinkAll ? 'on' : ''}" data-act="rinkview" data-id="all">All periods</button></div>
+  <svg viewBox="0 0 200 85" class="rink" data-act="rinktap"><defs><clipPath id="rc"><rect x="0.5" y="0.5" width="199" height="84" rx="28"/></clipPath></defs>
+    <g clip-path="url(#rc)"><rect width="200" height="85" class="rbg"/>
+      <rect x="0" width="75" height="85" class="rz${left}"/><rect x="125" width="75" height="85" class="rz${right}"/>
+      <line x1="100" x2="100" y2="85" class="rl red"/><line x1="75" x2="75" y2="85" class="rl blue"/><line x1="125" x2="125" y2="85" class="rl blue"/>
+      <line x1="11" x2="11" y2="85" class="rl red thin"/><line x1="189" x2="189" y2="85" class="rl red thin"/>
+      <circle cx="100" cy="42.5" r="15" class="rl blue thin" fill="none"/>
+      ${[[100, 42.5], [80, 20.5], [80, 64.5], [120, 20.5], [120, 64.5], [31, 20.5], [31, 64.5], [169, 20.5], [169, 64.5]].map(([x, y]) => dot(x, y)).join('')}
+      ${lab(left, 37.5)}${lab(right, 162.5)}${marks}</g>
+    <rect x="0.5" y="0.5" width="199" height="84" rx="28" fill="none" class="rl"/></svg>
+  <div class="hint" style="margin-top:6px">${hint}</div></div>`;
+}
+
 function iceView() {
   const sh = computeShifts(S.events, S.game, rem()); const on = onIceSet(S.events);
   return `${linesCard()}<div class="hint" style="margin-bottom:8px">${clockOn(S.game) ? 'Tap = on/off ice (game clock). Hold = note about player. Clock must be running for time to accumulate.' : 'Tap = on/off ice. Hold = note about player. Clock is off, so shift times are real (wall) time.'}</div>
@@ -229,7 +262,10 @@ function foView() {
     <table><tr><th></th>${bp.periods.map((p) => `<th>${periodLabel(p)}</th>`).join('')}<th>Game</th></tr>
     ${Object.entries(bp.rows).map(([id, r]) => `<tr><td>${esc(names[id] || pname(+id))}</td>${bp.periods.map((p) => `<td>${cell(r[p])}</td>`).join('')}<td>${cell(r.all)}</td></tr>`).join('')}
     <tr><td><b>Team</b></td>${bp.periods.map((p) => `<td><b>${cell(tm[p])}</b></td>`).join('')}<td><b>${cell(tm.all)}</b></td></tr></table></div>` : '';
-  return `${cen.length || fwd.length ? sect('Centers', cen) + sect('Forwards', fwd, other) : sect('Players', cs, other)}
+  const foPts = fos.filter((e) => (S.rinkAll || e.period === S.game.period) && e.data.x != null).map((e) => ({ x: e.data.x, y: e.data.y, cls: e.data.result.endsWith('win') ? 'for' : 'against', small: true }));
+  if (S.foPt) foPts.push({ ...S.foPt, cls: 'pend' });
+  const rk = rinkCard('Rink', foPts, S.foPt ? `Spot set in the ${{ O: 'offensive', D: 'defensive', N: 'neutral' }[S.foZone]} zone — now tap the result.` : S.rinkAll ? 'All periods, normalised: our offensive zone is on the right. Switch to “This period” to add or place points.' : 'Tap where the face-off is. Zone fills in automatically.');
+  return `${rk}${cen.length || fwd.length ? sect('Centers', cen) + sect('Forwards', fwd, other) : sect('Players', cs, other)}
   <h3 style="margin-top:14px">Zone</h3><div class="seg">${z.map(([k, l]) => `<button class="${S.foZone === k ? 'on' : ''}" data-act="fozone" data-id="${k}">${l}</button>`).join('')}</div>
   <div class="grid g2" style="margin-top:14px">${btn('clean_win', 'win')}${btn('scrappy_win', 'swin')}${btn('scrappy_loss', 'sloss')}${btn('clean_loss', 'loss')}</div>
   <div class="card glass" style="margin-top:14px"><h3>Face-off wins</h3><table>${[...cs, { id: 0, name: 'Other' }].map((c) => { const [w, t] = stat(c.id); return t ? `<tr><td>${esc(c.name)}</td><td>${w}/${t}</td><td>${Math.round((100 * w) / t)}%</td></tr>` : ''; }).join('') || '<tr><td class="hint">None yet</td></tr>'}</table></div>${byPeriod}`;
@@ -247,9 +283,16 @@ function statsView() {
   <div class="grid g3">${Object.entries(STATS).map(([k, l]) => `<button class="btn big" data-act="stat" data-lp="statnote" data-id="${k}">${l}<small>${mine.filter((e) => e.data.stat === k).length}</small></button>`).join('')}</div>
   <div class="hint" style="margin:6px 2px 14px">Tap +1 · hold to add a note about it.</div>
   <h3>Team</h3><div class="grid g2">${Object.entries(TEAM_STATS).map(([k, l]) => `<button class="btn big" data-act="tstat" data-id="${k}">${l}<small>${tcount(k)}</small></button>`).join('')}</div>
+  ${shotMap()}
   <h3 style="margin:18px 0 8px">Stat log</h3>${statLog()}`;
 }
 
+function shotMap() {
+  const pts = S.events.filter((e) => e.type === 'stat' && LOC_STATS.has(e.data.stat) && (S.rinkAll || e.period === S.game.period) && e.data.x != null)
+    .map((e) => ({ x: e.data.x, y: e.data.y, cls: e.data.stat.endsWith('against') ? 'against' : 'for', goal: e.data.stat.startsWith('goal') }));
+  const t = S.locCid && S.events.find((e) => e.cid === S.locCid);
+  return rinkCard('Shot map', pts, t ? `Tap the rink to place: <b>${esc(STAT_LABEL(t.data.stat))}</b>` : 'Log a shot or goal above, then tap the rink to place it.');
+}
 const STAT_LABEL = (k) => STATS[k] || TEAM_STATS[k] || k;
 const TEAM_TO_PLAYER = { goal_for: 'goal', shot_for: 'shot', pen_for: 'penalty' };
 const byNumber = (l) => l.slice().sort((a, b) => (parseInt(a.number) || 9999) - (parseInt(b.number) || 9999) || a.name.localeCompare(b.name));
@@ -341,6 +384,7 @@ const SWATCHES = ['#4f9bff', '#22c55e', '#ef4444', '#f97316', '#eab308', '#ec489
 const secSettings = () => `<div class="card glass"><h3>Game display</h3>
   <div class="hint" style="margin-bottom:6px">Player button labels</div>
   <div class="seg">${NAME_MODES.map(([k, l]) => `<button class="${S.nameMode === k ? 'on' : ''}" data-act="namemode" data-id="${k}">${l}</button>`).join('')}</div>
+  <div class="hint" style="margin:12px 0 6px">Our team name (shown on the rink)</div><input id="team_name" value="${esc(S.team)}" maxlength="24" placeholder="Us">
   ${S.game ? `<label class="hint row" style="margin-top:12px"><input type="checkbox" data-act="clockpower" ${clockOn(S.game) ? 'checked' : ''} style="width:auto"> Show game clock for this game</label>` : ''}</div>
   <div class="card glass"><h3>Appearance</h3>
   <div class="seg">${[['system', 'System'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => `<button class="${S.theme === k ? 'on' : ''}" data-act="theme" data-id="${k}">${l}</button>`).join('')}</div></div>
@@ -517,16 +561,31 @@ const A = {
   alloff: () => { closeShifts(snap()); },
   focenter: (id) => { S.foSel = +id; },
   fofmt: (id) => { S.foFmt = id; },
-  fozone: (id) => { S.foZone = id; },
+  fozone: (id) => { S.foZone = id; if (S.foPt && zoneAt(S.foPt.x) !== id) S.foPt = null; },
+  swapsides: () => {
+    const g = S.game; const f = flipsOf(g); if (f[g.period]) delete f[g.period]; else f[g.period] = true;
+    g.flips = JSON.stringify(f); queue({ key: 'flips', method: 'PATCH', url: `/api/games/${g.id}`, body: { flips: g.flips } }); cache();
+  },
+  rinkview: (id) => { S.rinkAll = id === 'all'; },
+  rinktap: (_, el, ev) => {
+    if (S.rinkAll) { toast('Switch to “This period” to place points'); return false; }
+    const r = el.getBoundingClientRect(); const f = !!flipsOf(S.game)[S.game.period];
+    const c = (v) => Math.max(0, Math.min(1, v)); let x = c((ev.clientX - r.left) / r.width); let y = c((ev.clientY - r.top) / r.height);
+    if (f) { x = 1 - x; y = 1 - y; }
+    x = +x.toFixed(3); y = +y.toFixed(3); navigator.vibrate?.(10);
+    if (S.tab === 'faceoff') { S.foPt = { x, y }; S.foZone = zoneAt(x); return; }
+    if (!S.locCid) { toast('Log a shot or goal first, then tap the rink'); return false; }
+    editEvent(S.locCid, { data: { x, y } }); S.locCid = null; toast('Placed');
+  },
   fo: (r) => {
-    const e = addEvent('faceoff', S.foSel || null, { result: r, zone: S.foZone });
+    const e = addEvent('faceoff', S.foSel || null, { result: r, zone: S.foZone, ...(S.foPt || {}) }); S.foPt = null;
     navigator.vibrate?.(15); render(); undoable(`${S.foSel ? first(S.foSel) : 'Other'}: ${RESULTS[r]}`, e); return false;
   },
   statpick: () => { S.statPick = true; },
   statpickcancel: () => { S.statPick = false; },
   statsel: (id) => { S.statSel = +id; S.statPick = false; },
-  stat: (k) => { const who = S.statSel ? first(S.statSel) : 'Unknown'; const e = addEvent('stat', S.statSel || null, { stat: k }); S.statSel = 0; navigator.vibrate?.(15); render(); undoable(`${who} +${STATS[k]}`, e); return false; },
-  tstat: (k) => { const e = addEvent('stat', null, { stat: k }); render(); undoable(TEAM_STATS[k], e); return false; },
+  stat: (k) => { const who = S.statSel ? first(S.statSel) : 'Unknown'; const e = addEvent('stat', S.statSel || null, { stat: k }); if (LOC_STATS.has(k)) S.locCid = e.cid; S.statSel = 0; navigator.vibrate?.(15); render(); undoable(`${who} +${STATS[k]}`, e); return false; },
+  tstat: (k) => { const e = addEvent('stat', null, { stat: k }); if (LOC_STATS.has(k)) S.locCid = e.cid; render(); undoable(TEAM_STATS[k], e); return false; },
   logedit: (id) => {
     const i = id.lastIndexOf(':'); const cid = id.slice(0, i); const f = id.slice(i + 1);
     if (S.swiped) { S.swiped = null; return; }
@@ -632,7 +691,7 @@ document.addEventListener('click', async (e) => {
   if (el.classList.contains('overlay') && e.target !== el) return;
   if (lpFired) { lpFired = false; return; }
   try {
-    const r = await A[el.dataset.act](el.dataset.id, el);
+    const r = await A[el.dataset.act](el.dataset.id, el, e);
     if (r !== false) render();
   } catch (err) { toast('Error: ' + err.message); }
 });
@@ -649,6 +708,7 @@ document.addEventListener('input', (e) => {
   if (e.target.id === 'nt') { S.composer.text = e.target.value; S.composer.stamp ||= snap(); }
   if (e.target.id === 'acc_pick') { setAccent(e.target.value); const h = $('#acc_hex'); if (h) h.value = S.accent; document.querySelectorAll('.swatch.on').forEach((x) => x.classList.remove('on')); }
   if (e.target.id === 'acc_hex') { let v = e.target.value.trim(); if (v && v[0] !== '#') v = '#' + v; if (HEX.test(v)) { setAccent(v); const pk = $('#acc_pick'); if (pk) pk.value = S.accent; } }
+  if (e.target.id === 'team_name') { S.team = e.target.value.trim() || 'Us'; ls.set('ht_team', S.team); }
   if (e.target.id === 'auto') { S.autosave = e.target.checked; ls.set('ht_autosave', S.autosave); }
 });
 

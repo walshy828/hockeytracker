@@ -30,6 +30,7 @@ CREATE INDEX IF NOT EXISTS ev_game ON events(game_id, id);
 `);
 try { db.exec("ALTER TABLE games ADD COLUMN lines TEXT DEFAULT ''"); } catch {}
 try { db.exec('ALTER TABLE games ADD COLUMN clock_enabled INTEGER DEFAULT 1'); } catch {}
+try { db.exec("ALTER TABLE games ADD COLUMN flips TEXT DEFAULT ''"); } catch {}
 
 const q = (sql, ...a) => db.prepare(sql).all(...a);
 const one = (sql, ...a) => db.prepare(sql).get(...a);
@@ -53,7 +54,7 @@ const readBody = (req) => new Promise((ok, bad) => {
   req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch (e) { bad(e); } });
 });
 
-const GAME_FIELDS = ['opponent', 'date', 'location', 'status', 'period', 'period_len', 'clock_s', 'clock_since', 'lines', 'clock_enabled'];
+const GAME_FIELDS = ['opponent', 'date', 'location', 'status', 'period', 'period_len', 'clock_s', 'clock_since', 'lines', 'clock_enabled', 'flips'];
 const PLAYER_FIELDS = ['name', 'number', 'position', 'focus'];
 const patch = (table, id, body, fields) => {
   const keys = fields.filter((f) => f in body);

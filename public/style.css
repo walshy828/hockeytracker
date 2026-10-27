@@ -116,3 +116,9 @@ input[type=color]{width:56px;height:46px;padding:3px;flex:none;cursor:pointer}
 .swrow.open .swin{transform:translateX(-88px)}
 .sc{min-height:46px;display:flex;align-items:center;font-variant-numeric:tabular-nums;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sc.unset{color:var(--mut)}
+
+.rink{display:block;width:100%;height:auto;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+.rink .rbg{fill:var(--glass)}.rink .rzO{fill:color-mix(in srgb,var(--ok) 16%,transparent)}.rink .rzD{fill:color-mix(in srgb,var(--bad) 14%,transparent)}
+.rink .rl{stroke:var(--mut);stroke-width:.7;fill:none}.rink .rl.red{stroke:#ef4444;stroke-width:1}.rink .rl.blue{stroke:#4f9bff;stroke-width:1.6}.rink .rl.thin{stroke-width:.6}.rink .rl.rf{fill:#ef4444;stroke:none}
+.rink .rz{fill:var(--txt);opacity:.3;font-size:6px;font-weight:800;letter-spacing:.06em;pointer-events:none}.rink .rzn{font-size:7.5px;opacity:.4;letter-spacing:0}
+.rink .rp{stroke:#fff;stroke-width:.6;pointer-events:none}.rink .rp.for{fill:var(--ok)}.rink .rp.against{fill:var(--bad)}.rink .rp.pend{fill:var(--acc);stroke-width:1.2}.rink .rp.goal{stroke-width:1.4}
